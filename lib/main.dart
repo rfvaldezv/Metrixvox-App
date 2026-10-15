@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:metrixvox_app/config/app_config.dart';
+import 'package:metrixvox_app/config/theme.dart';
+import 'package:metrixvox_app/screens/kiosco/idle_screen.dart';
 import 'package:metrixvox_app/screens/dashboard_screen.dart';
 import 'package:metrixvox_app/screens/dynamic_survey_screen.dart';
 import 'package:metrixvox_app/services/storage_service.dart';
@@ -16,30 +18,25 @@ class MetrixVoxApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'MetrixVox',
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
-        useMaterial3: true,
-      ),
-      home: const TenantSelectorScreen(),
+      theme: MetrixTheme.light(),
+      home: const KioskRootScreen(),
       debugShowCheckedModeBanner: false,
     );
   }
 }
 
-// Pantalla inicial de configuración de Sucursal / Tenant
-class TenantSelectorScreen extends StatefulWidget {
-  const TenantSelectorScreen({super.key});
+/// Pantalla raíz que decide qué mostrar según el estado de la config.
+/// Ahora mismo: carga la config y muestra el IdleScreen del kiosco.
+class KioskRootScreen extends StatefulWidget {
+  const KioskRootScreen({super.key});
 
   @override
-  State<TenantSelectorScreen> createState() => _TenantSelectorScreenState();
+  State<KioskRootScreen> createState() => _KioskRootScreenState();
 }
 
-class _TenantSelectorScreenState extends State<TenantSelectorScreen> {
-  final TextEditingController _tenantController =
-      TextEditingController(text: AppConfig.defaultTenantId);
-  final TextEditingController _surveyController =
-      TextEditingController(text: AppConfig.defaultSurveyCode);
-  bool _isLoading = false;
+class _KioskRootScreenState extends State<KioskRootScreen> {
+  String _tenantId = AppConfig.defaultTenantId;
+  String _surveyCode = AppConfig.defaultSurveyCode;
   bool _configLoaded = false;
 
   @override
@@ -48,20 +45,114 @@ class _TenantSelectorScreenState extends State<TenantSelectorScreen> {
     _loadSavedConfig();
   }
 
-  /// Carga la config guardada en sesiones anteriores (si existe).
   Future<void> _loadSavedConfig() async {
     final config = await StorageService.loadConfig();
     if (!mounted) return;
 
     setState(() {
       if (config.tenantId != null && config.tenantId!.isNotEmpty) {
-        _tenantController.text = config.tenantId!;
+        _tenantId = config.tenantId!;
       }
       if (config.surveyCode != null && config.surveyCode!.isNotEmpty) {
-        _surveyController.text = config.surveyCode!;
+        _surveyCode = config.surveyCode!;
       }
       _configLoaded = true;
     });
+  }
+
+  /// Botón "TOCA PARA COMENZAR" del kiosco.
+  Future<void> _onStart() async {
+    try {
+      final surveyService = SurveyService(tenantId: _tenantId);
+      final surveyData = await surveyService.fetchSurvey(_surveyCode);
+
+      if (!mounted) return;
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => DynamicSurveyScreen(
+            surveyData: surveyData,
+            tenantId: _tenantId,
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text("Error de conexión"),
+          content: Text("No se pudo cargar la encuesta.\n\n$e"),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text("Aceptar"),
+            ),
+          ],
+        ),
+      );
+    }
+  }
+
+  /// Botón admin discreto: abre el panel de configuración.
+  void _onAdminTap() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => _AdminConfigScreen(
+          initialTenantId: _tenantId,
+          initialSurveyCode: _surveyCode,
+          onSaved: (tenant, survey) {
+            setState(() {
+              _tenantId = tenant;
+              _surveyCode = survey;
+            });
+          },
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_configLoaded) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    return IdleScreen(
+      onStart: _onStart,
+      onAdminTap: _onAdminTap,
+    );
+  }
+}
+
+/// Panel de configuración accesible desde el botón admin del kiosco.
+class _AdminConfigScreen extends StatefulWidget {
+  final String initialTenantId;
+  final String initialSurveyCode;
+  final void Function(String tenant, String survey) onSaved;
+
+  const _AdminConfigScreen({
+    required this.initialTenantId,
+    required this.initialSurveyCode,
+    required this.onSaved,
+  });
+
+  @override
+  State<_AdminConfigScreen> createState() => _AdminConfigScreenState();
+}
+
+class _AdminConfigScreenState extends State<_AdminConfigScreen> {
+  late final TextEditingController _tenantController;
+  late final TextEditingController _surveyController;
+
+  @override
+  void initState() {
+    super.initState();
+    _tenantController = TextEditingController(text: widget.initialTenantId);
+    _surveyController = TextEditingController(text: widget.initialSurveyCode);
   }
 
   @override
@@ -71,99 +162,54 @@ class _TenantSelectorScreenState extends State<TenantSelectorScreen> {
     super.dispose();
   }
 
-  Future<void> _cargarEncuesta() async {
-    final tenantId = _tenantController.text.trim().toUpperCase();
-    final surveyCode = _surveyController.text.trim();
+  Future<void> _save() async {
+    final tenant = _tenantController.text.trim().toUpperCase();
+    final survey = _surveyController.text.trim();
 
-    if (tenantId.isEmpty || surveyCode.isEmpty) {
+    if (tenant.isEmpty || survey.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content:
-                Text('Por favor, ingresa el Tenant ID y el Código de Encuesta.')),
+        const SnackBar(content: Text('Completa todos los campos')),
       );
       return;
     }
 
-    setState(() => _isLoading = true);
+    await StorageService.saveConfig(tenantId: tenant, surveyCode: survey);
+    widget.onSaved(tenant, survey);
 
-    try {
-      final surveyService = SurveyService(tenantId: tenantId);
-      final surveyData = await surveyService.fetchSurvey(surveyCode);
-
-      // Guardar config para la próxima vez
-      await StorageService.saveConfig(
-        tenantId: tenantId,
-        surveyCode: surveyCode,
-      );
-
-      if (!mounted) return;
-      setState(() => _isLoading = false);
-
-      // Navegar a la pantalla dinámica de la encuesta
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (context) => DynamicSurveyScreen(
-            surveyData: surveyData,
-            tenantId: tenantId,
-          ),
-        ),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _isLoading = false);
-      showDialog(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text("Error de Conexión"),
-          content: Text(
-            "No se pudo cargar la encuesta.\n\n$e",
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text("Aceptar"),
-            )
-          ],
-        ),
-      );
-    }
+    if (!mounted) return;
+    Navigator.pop(context);
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Configuración guardada')),
+    );
   }
 
-  void _abrirDashboard() {
-    final tenantId = _tenantController.text.trim().toUpperCase();
-
-    if (tenantId.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Por favor, ingresa el Tenant ID.')),
-      );
-      return;
-    }
+  Future<void> _openDashboard() async {
+    final tenant = _tenantController.text.trim().toUpperCase();
+    if (tenant.isEmpty) return;
 
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => DashboardScreen(tenantId: tenantId),
+        builder: (context) => DashboardScreen(tenantId: tenant),
       ),
     );
   }
 
-  Future<void> _olvidarConfiguracion() async {
+  Future<void> _forget() async {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Olvidar configuración'),
         content: const Text(
-          'Se borrarán el Tenant ID y el Código de Encuesta guardados '
-          'en este dispositivo.',
+          'Se borrarán el Tenant ID y Código de Encuesta guardados.',
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
+            onPressed: () => Navigator.pop(context, false),
             child: const Text('Cancelar'),
           ),
           TextButton(
-            onPressed: () => Navigator.of(context).pop(true),
+            onPressed: () => Navigator.pop(context, true),
             child: const Text('Olvidar', style: TextStyle(color: Colors.red)),
           ),
         ],
@@ -171,62 +217,56 @@ class _TenantSelectorScreenState extends State<TenantSelectorScreen> {
     );
 
     if (confirm != true) return;
-
     await StorageService.clearConfig();
     if (!mounted) return;
-
-    setState(() {
-      _tenantController.text = AppConfig.defaultTenantId;
-      _surveyController.text = AppConfig.defaultSurveyCode;
-    });
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Configuración eliminada.')),
-    );
+    Navigator.pop(context);
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('MetrixVox - Terminal de Captura'),
-        backgroundColor: Colors.indigo,
+        title: const Text('Panel de administrador'),
+        backgroundColor: MetrixTheme.indigo,
         foregroundColor: Colors.white,
         actions: [
-          if (_configLoaded)
-            IconButton(
-              icon: const Icon(Icons.delete_outline),
-              tooltip: 'Olvidar configuración',
-              onPressed: _olvidarConfiguracion,
-            ),
+          IconButton(
+            icon: const Icon(Icons.delete_outline),
+            tooltip: 'Olvidar configuración',
+            onPressed: _forget,
+          ),
         ],
       ),
       body: Padding(
-        padding: const EdgeInsets.all(24.0),
+        padding: const EdgeInsets.all(24),
         child: Center(
           child: SingleChildScrollView(
             child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 400),
+              constraints: const BoxConstraints(maxWidth: 480),
               child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  const Icon(Icons.analytics_rounded,
-                      size: 80, color: Colors.indigo),
-                  const SizedBox(height: 16),
+                  const Icon(
+                    Icons.settings_rounded,
+                    size: 64,
+                    color: MetrixTheme.indigo,
+                  ),
+                  const SizedBox(height: 24),
                   const Text(
-                    "Configuración de Dispositivo",
+                    'Configuración del kiosco',
                     textAlign: TextAlign.center,
                     style: TextStyle(
-                        fontSize: 22,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.indigo),
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                      color: MetrixTheme.indigo,
+                    ),
                   ),
                   const SizedBox(height: 32),
                   TextField(
                     controller: _tenantController,
                     decoration: const InputDecoration(
-                      labelText: "Tenant ID (Ej. HOSPITAL_SAN_JOSE)",
+                      labelText: 'Tenant ID',
+                      helperText: 'Ej. HOSPITAL_SAN_JOSE',
                       border: OutlineInputBorder(),
                       prefixIcon: Icon(Icons.business),
                     ),
@@ -236,35 +276,23 @@ class _TenantSelectorScreenState extends State<TenantSelectorScreen> {
                   TextField(
                     controller: _surveyController,
                     decoration: const InputDecoration(
-                      labelText: "Código de Encuesta (Ej. SURVEY_HOSPITAL_01)",
+                      labelText: 'Código de Encuesta',
+                      helperText: 'Ej. SURVEY_HOSPITAL_01',
                       border: OutlineInputBorder(),
                       prefixIcon: Icon(Icons.assignment),
                     ),
                   ),
                   const SizedBox(height: 24),
-                  SizedBox(
-                    height: 50,
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.indigo,
-                        foregroundColor: Colors.white,
-                      ),
-                      onPressed: _isLoading ? null : _cargarEncuesta,
-                      child: _isLoading
-                          ? const CircularProgressIndicator(color: Colors.white)
-                          : const Text("Iniciar Cuestionario",
-                              style: TextStyle(fontSize: 16)),
-                    ),
+                  ElevatedButton.icon(
+                    onPressed: _save,
+                    icon: const Icon(Icons.save),
+                    label: const Text('Guardar configuración'),
                   ),
                   const SizedBox(height: 12),
-                  SizedBox(
-                    height: 50,
-                    child: OutlinedButton.icon(
-                      onPressed: _abrirDashboard,
-                      icon: const Icon(Icons.bar_chart),
-                      label: const Text("Ver Dashboard",
-                          style: TextStyle(fontSize: 16)),
-                    ),
+                  OutlinedButton.icon(
+                    onPressed: _openDashboard,
+                    icon: const Icon(Icons.bar_chart),
+                    label: const Text('Ver Dashboard'),
                   ),
                 ],
               ),
