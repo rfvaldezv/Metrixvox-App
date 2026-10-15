@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:metrixvox_app/config/app_config.dart';
 import 'package:metrixvox_app/config/theme.dart';
-import 'package:metrixvox_app/screens/kiosco/idle_screen.dart';
+import 'package:metrixvox_app/models/survey.dart';
 import 'package:metrixvox_app/screens/dashboard_screen.dart';
-import 'package:metrixvox_app/screens/dynamic_survey_screen.dart';
+import 'package:metrixvox_app/screens/kiosco/idle_screen.dart';
+import 'package:metrixvox_app/screens/kiosco/survey_flow_screen.dart';
 import 'package:metrixvox_app/services/storage_service.dart';
 import 'package:metrixvox_app/services/survey_service.dart';
 
@@ -26,7 +27,6 @@ class MetrixVoxApp extends StatelessWidget {
 }
 
 /// Pantalla raíz que decide qué mostrar según el estado de la config.
-/// Ahora mismo: carga la config y muestra el IdleScreen del kiosco.
 class KioskRootScreen extends StatefulWidget {
   const KioskRootScreen({super.key});
 
@@ -64,14 +64,15 @@ class _KioskRootScreenState extends State<KioskRootScreen> {
   Future<void> _onStart() async {
     try {
       final surveyService = SurveyService(tenantId: _tenantId);
-      final surveyData = await surveyService.fetchSurvey(_surveyCode);
+      final raw = await surveyService.fetchSurvey(_surveyCode);
+      final survey = Survey.fromJson(raw);
 
       if (!mounted) return;
       Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (context) => DynamicSurveyScreen(
-            surveyData: surveyData,
+          builder: (context) => SurveyFlowScreen(
+            survey: survey,
             tenantId: _tenantId,
           ),
         ),
