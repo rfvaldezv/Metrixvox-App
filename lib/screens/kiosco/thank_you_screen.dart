@@ -31,8 +31,12 @@ class _ThankYouScreenState extends State<ThankYouScreen> {
     _confettiController.play();
 
     _returnTimer = Timer(widget.autoReturnDuration, () {
-      if (!mounted) return;
-      widget.onComplete();
+        if (!mounted) return;
+        // Ejecutar el callback en el siguiente frame para evitar
+        // problemas de rebuild durante la animación
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) widget.onComplete();
+        });
     });
   }
 

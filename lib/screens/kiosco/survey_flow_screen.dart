@@ -1,6 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_animate/flutter_animate.dart';
-import 'package:metrixvox_app/config/theme.dart';
 import 'package:metrixvox_app/models/survey.dart';
 import 'package:metrixvox_app/screens/kiosco/question_view.dart';
 import 'package:metrixvox_app/screens/kiosco/thank_you_screen.dart';
@@ -14,11 +12,15 @@ import 'package:metrixvox_app/widgets/progress_bar.dart';
 class SurveyFlowScreen extends StatefulWidget {
   final Survey survey;
   final String tenantId;
+  final String? branchName;
+  final VoidCallback onCompleted;   // 🆕
 
   const SurveyFlowScreen({
     super.key,
     required this.survey,
     required this.tenantId,
+    this.branchName,
+    required this.onCompleted,      // 🆕
   });
 
   @override
@@ -99,13 +101,13 @@ class _SurveyFlowScreenState extends State<SurveyFlowScreen> {
       "tenantId": widget.tenantId,
       "surveyCode": widget.survey.surveyCode,
       "respondentContext": {
-        "subjectId": null,
-        "branchOrLocationId": "SUCURSAL_CENTRO",
-        "channel": "TABLET",
+      "subjectId": null,
+      "branchOrLocationId": widget.branchName ?? "SUCURSAL_CENTRO",
+      "channel": "TABLET",
       },
       "metrics": metricsPayload,
       "sentimentAnalysis": {
-        "verbatim": _verbatimController.text.trim(),
+      "verbatim": _verbatimController.text.trim(),
       }
     };
 
@@ -118,14 +120,11 @@ class _SurveyFlowScreenState extends State<SurveyFlowScreen> {
     if (success) {
       // Ir a la pantalla de agradecimiento
       Navigator.of(context).pushReplacement(
-        MaterialPageRoute(
-          builder: (_) => ThankYouScreen(
-            onComplete: () {
-              // Volver al inicio del kiosco (pop hasta la raíz)
-              Navigator.of(context).popUntil((route) => route.isFirst);
-            },
+          MaterialPageRoute(
+              builder: (_) => ThankYouScreen(
+                  onComplete: widget.onCompleted,  // ← llama al callback del padre
+              ),
           ),
-        ),
       );
     } else {
       ScaffoldMessenger.of(context).showSnackBar(

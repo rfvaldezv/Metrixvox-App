@@ -2,9 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:metrixvox_app/config/app_config.dart';
 import 'package:metrixvox_app/config/theme.dart';
 import 'package:metrixvox_app/models/survey.dart';
-import 'package:metrixvox_app/screens/dashboard_screen.dart';
+import 'package:metrixvox_app/screens/kiosco/error_screen.dart';
 import 'package:metrixvox_app/screens/kiosco/idle_screen.dart';
 import 'package:metrixvox_app/screens/kiosco/survey_flow_screen.dart';
+import 'package:metrixvox_app/services/kiosk_service.dart';
 import 'package:metrixvox_app/services/storage_service.dart';
 import 'package:metrixvox_app/services/survey_service.dart';
 
@@ -26,7 +27,11 @@ class MetrixVoxApp extends StatelessWidget {
   }
 }
 
-/// Pantalla raíz que decide qué mostrar según el estado de la config.
+/// Pantalla raíz del kiosco.
+/// Flujo:
+///   1. Obtiene el kiosk token (de env o storage)
+///   2. Llama a /api/v1/kiosks/me para obtener su config
+///   3. Al tocar "TOCA PARA COMENZAR", carga la encuesta
 class KioskRootScreen extends StatefulWidget {
   const KioskRootScreen({super.key});
 
@@ -35,272 +40,132 @@ class KioskRootScreen extends StatefulWidget {
 }
 
 class _KioskRootScreenState extends State<KioskRootScreen> {
-  String _tenantId = AppConfig.defaultTenantId;
-  String _surveyCode = AppConfig.defaultSurveyCode;
-  bool _configLoaded = false;
+  KioskConfig? _config;
+  String _errorMessage = '';
+  bool _isLoading = true;
 
   @override
   void initState() {
     super.initState();
-    _loadSavedConfig();
+    _bootstrap();
   }
 
-  Future<void> _loadSavedConfig() async {
-    final config = await StorageService.loadConfig();
-    if (!mounted) return;
-
+  /// Arranca el kiosco: obtiene config y prepara todo.
+  Future<void> _bootstrap() async {
     setState(() {
-      if (config.tenantId != null && config.tenantId!.isNotEmpty) {
-        _tenantId = config.tenantId!;
-      }
-      if (config.surveyCode != null && config.surveyCode!.isNotEmpty) {
-        _surveyCode = config.surveyCode!;
-      }
-      _configLoaded = true;
+      _isLoading = true;
+      _errorMessage = '';
     });
-  }
 
-  /// Botón "TOCA PARA COMENZAR" del kiosco.
-  Future<void> _onStart() async {
     try {
-      final surveyService = SurveyService(tenantId: _tenantId);
-      final raw = await surveyService.fetchSurvey(_surveyCode);
-      final survey = Survey.fromJson(raw);
+      // 1) Obtener kiosk token (de env o storage)
+      final kioskToken = await _resolveKioskToken();
+
+      if (kioskToken.isEmpty) {
+        throw KioskException(
+          'Kiosco no configurado.\n'
+          'Contacta al administrador para asignarte un token.',
+        );
+      }
+
+      // 2) Consultar /kiosks/me
+      final config = await KioskService.getMyConfig(kioskToken);
 
       if (!mounted) return;
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (context) => SurveyFlowScreen(
-            survey: survey,
-            tenantId: _tenantId,
-          ),
-        ),
-      );
+      setState(() {
+        _config = config;
+        _isLoading = false;
+      });
+    } on KioskException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _errorMessage = e.message;
+        _isLoading = false;
+      });
     } catch (e) {
       if (!mounted) return;
-      showDialog(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text("Error de conexión"),
-          content: Text("No se pudo cargar la encuesta.\n\n$e"),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text("Aceptar"),
-            ),
-          ],
-        ),
-      );
+      setState(() {
+        _errorMessage = 'Error inesperado: $e';
+        _isLoading = false;
+      });
     }
   }
 
-  /// Botón admin discreto: abre el panel de configuración.
-  void _onAdminTap() {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => _AdminConfigScreen(
-          initialTenantId: _tenantId,
-          initialSurveyCode: _surveyCode,
-          onSaved: (tenant, survey) {
-            setState(() {
-              _tenantId = tenant;
-              _surveyCode = survey;
-            });
-          },
+  /// Resuelve el token del kiosco desde:
+  ///   1. --dart-define=KIOSK_TOKEN=xxxxx
+  ///   2. shared_preferences (si se configuró alguna vez)
+  Future<String> _resolveKioskToken() async {
+    if (AppConfig.kioskTokenFromEnv.isNotEmpty) {
+      return AppConfig.kioskTokenFromEnv;
+    }
+    return await StorageService.loadKioskToken() ?? '';
+  }
+
+  /// Botón "TOCA PARA COMENZAR": carga la encuesta y entra al flujo.
+  Future<void> _onStart() async {
+    if (_config == null) return;
+
+    try {
+      final surveyService = SurveyService(tenantId: _config!.tenantId);
+      final raw = await surveyService.fetchSurvey(_config!.surveyCode);
+     final survey = Survey.fromJson(raw);
+
+      if (!mounted) return;
+
+      // Capturamos el Navigator antes del push
+      final navigator = Navigator.of(context);
+
+      await navigator.push(
+        MaterialPageRoute(
+          builder: (routeContext) => SurveyFlowScreen(
+            survey: survey,
+            tenantId: _config!.tenantId,
+            branchName: _config!.branchName,
+            onCompleted: () {
+              // Usar el Navigator capturado (siempre válido)
+              debugPrint('[Main] onCompleted — popUntil ejecutado');
+              navigator.popUntil((route) => route.isFirst);
+            },
+          ),
         ),
+      );
+  } catch (e) {
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Error'),
+        content: Text('No se pudo cargar la encuesta.\n\n$e'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Aceptar'),
+          ),
+        ],
       ),
     );
   }
+}
+
 
   @override
   Widget build(BuildContext context) {
-    if (!_configLoaded) {
+    if (_isLoading) {
       return const Scaffold(
         body: Center(child: CircularProgressIndicator()),
       );
     }
 
-    return IdleScreen(
-      onStart: _onStart,
-      onAdminTap: _onAdminTap,
-    );
-  }
-}
-
-/// Panel de configuración accesible desde el botón admin del kiosco.
-class _AdminConfigScreen extends StatefulWidget {
-  final String initialTenantId;
-  final String initialSurveyCode;
-  final void Function(String tenant, String survey) onSaved;
-
-  const _AdminConfigScreen({
-    required this.initialTenantId,
-    required this.initialSurveyCode,
-    required this.onSaved,
-  });
-
-  @override
-  State<_AdminConfigScreen> createState() => _AdminConfigScreenState();
-}
-
-class _AdminConfigScreenState extends State<_AdminConfigScreen> {
-  late final TextEditingController _tenantController;
-  late final TextEditingController _surveyController;
-
-  @override
-  void initState() {
-    super.initState();
-    _tenantController = TextEditingController(text: widget.initialTenantId);
-    _surveyController = TextEditingController(text: widget.initialSurveyCode);
-  }
-
-  @override
-  void dispose() {
-    _tenantController.dispose();
-    _surveyController.dispose();
-    super.dispose();
-  }
-
-  Future<void> _save() async {
-    final tenant = _tenantController.text.trim().toUpperCase();
-    final survey = _surveyController.text.trim();
-
-    if (tenant.isEmpty || survey.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Completa todos los campos')),
+    if (_errorMessage.isNotEmpty) {
+      return KioskErrorScreen(
+        message: _errorMessage,
+        onRetry: _bootstrap,
       );
-      return;
     }
 
-    await StorageService.saveConfig(tenantId: tenant, surveyCode: survey);
-    widget.onSaved(tenant, survey);
-
-    if (!mounted) return;
-    Navigator.pop(context);
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Configuración guardada')),
-    );
-  }
-
-  Future<void> _openDashboard() async {
-    final tenant = _tenantController.text.trim().toUpperCase();
-    if (tenant.isEmpty) return;
-
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => DashboardScreen(tenantId: tenant),
-      ),
-    );
-  }
-
-  Future<void> _forget() async {
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Olvidar configuración'),
-        content: const Text(
-          'Se borrarán el Tenant ID y Código de Encuesta guardados.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancelar'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Olvidar', style: TextStyle(color: Colors.red)),
-          ),
-        ],
-      ),
-    );
-
-    if (confirm != true) return;
-    await StorageService.clearConfig();
-    if (!mounted) return;
-    Navigator.pop(context);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Panel de administrador'),
-        backgroundColor: MetrixTheme.indigo,
-        foregroundColor: Colors.white,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.delete_outline),
-            tooltip: 'Olvidar configuración',
-            onPressed: _forget,
-          ),
-        ],
-      ),
-      body: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Center(
-          child: SingleChildScrollView(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 480),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  const Icon(
-                    Icons.settings_rounded,
-                    size: 64,
-                    color: MetrixTheme.indigo,
-                  ),
-                  const SizedBox(height: 24),
-                  const Text(
-                    'Configuración del kiosco',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.bold,
-                      color: MetrixTheme.indigo,
-                    ),
-                  ),
-                  const SizedBox(height: 32),
-                  TextField(
-                    controller: _tenantController,
-                    decoration: const InputDecoration(
-                      labelText: 'Tenant ID',
-                      helperText: 'Ej. HOSPITAL_SAN_JOSE',
-                      border: OutlineInputBorder(),
-                      prefixIcon: Icon(Icons.business),
-                    ),
-                    textCapitalization: TextCapitalization.characters,
-                  ),
-                  const SizedBox(height: 16),
-                  TextField(
-                    controller: _surveyController,
-                    decoration: const InputDecoration(
-                      labelText: 'Código de Encuesta',
-                      helperText: 'Ej. SURVEY_HOSPITAL_01',
-                      border: OutlineInputBorder(),
-                      prefixIcon: Icon(Icons.assignment),
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-                  ElevatedButton.icon(
-                    onPressed: _save,
-                    icon: const Icon(Icons.save),
-                    label: const Text('Guardar configuración'),
-                  ),
-                  const SizedBox(height: 12),
-                  OutlinedButton.icon(
-                    onPressed: _openDashboard,
-                    icon: const Icon(Icons.bar_chart),
-                    label: const Text('Ver Dashboard'),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
+    return IdleScreen(
+      onStart: _onStart,
+      onAdminTap: () {}, // Ya no hay panel admin en el kiosco
     );
   }
 }

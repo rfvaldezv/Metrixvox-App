@@ -58,7 +58,7 @@ class IdleScreen extends StatelessWidget {
                       // Título
                       Text(
                         '¡Bienvenido!',
-                        style: TextStyle(
+                        style: const TextStyle(
                           fontFamily: 'Poppins',
                           fontSize: 56,
                           fontWeight: FontWeight.w700,
@@ -111,13 +111,6 @@ class IdleScreen extends StatelessWidget {
                     ],
                   ),
                 ),
-              ),
-
-              // Botón admin discreto (esquina inferior derecha)
-              Positioned(
-                bottom: 20,
-                right: 20,
-                child: _AdminButton(onTap: onAdminTap),
               ),
             ],
           ),
@@ -180,37 +173,6 @@ class _BigStartButton extends StatelessWidget {
                 ),
               ),
             ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// Botón discreto para acceder al modo administrador
-class _AdminButton extends StatelessWidget {
-  final VoidCallback onTap;
-
-  const _AdminButton({required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(50),
-        child: Container(
-          width: 56,
-          height: 56,
-          decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.15),
-            shape: BoxShape.circle,
-          ),
-          child: Icon(
-            Icons.lock_outline_rounded,
-            color: Colors.white.withOpacity(0.7),
-            size: 24,
           ),
         ),
       ),

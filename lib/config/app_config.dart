@@ -1,6 +1,6 @@
 // Configuración central de la App.
-// La URL de la API puede cambiarse al ejecutar, sin tocar el código:
-//   flutter run -d chrome --dart-define=API_URL=http://localhost:5188
+// La URL de la API y el KIOSK_TOKEN pueden cambiarse al ejecutar:
+//   flutter run -d chrome --dart-define=API_URL=http://localhost:5188 --dart-define=KIOSK_TOKEN=xxxxx
 class AppConfig {
   // ============================================================
   // API
@@ -12,24 +12,22 @@ class AppConfig {
 
   static String get surveysUrl => '$apiBaseUrl/api/v1/surveys';
   static String get dashboardUrl => '$apiBaseUrl/api/v1/dashboard';
+  static String get kiosksUrl => '$apiBaseUrl/api/v1/kiosks';
 
   // ============================================================
-  // Defaults del Tenant Selector
-  // Pueden sobreescribirse con --dart-define=TENANT_ID=OTRO
+  // KIOSK TOKEN
+  // Puede venir de --dart-define=KIOSK_TOKEN=xxxxx
+  // O guardarse en shared_preferences (modo config manual)
   // ============================================================
-  static const String defaultTenantId = String.fromEnvironment(
-    'TENANT_ID',
-    defaultValue: 'HOSPITAL_SAN_JOSE',
-  );
-
-  static const String defaultSurveyCode = String.fromEnvironment(
-    'SURVEY_CODE',
-    defaultValue: 'SURVEY_HOSPITAL_01',
+  static const String kioskTokenFromEnv = String.fromEnvironment(
+    'KIOSK_TOKEN',
+    defaultValue: '',
   );
 
   // ============================================================
-  // Claves de almacenamiento local (shared_preferences)
+  // Claves de almacenamiento local
   // ============================================================
+  static const String storageKeyKioskToken = 'metrixvox.kiosk_token';
   static const String storageKeyTenant = 'metrixvox.tenant_id';
   static const String storageKeySurvey = 'metrixvox.survey_code';
 

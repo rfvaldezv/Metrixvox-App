@@ -29,4 +29,22 @@ class StorageService {
     await prefs.remove(AppConfig.storageKeyTenant);
     await prefs.remove(AppConfig.storageKeySurvey);
   }
+
+  /// Guarda el kiosk token (para modo config manual en el futuro).
+  static Future<void> saveKioskToken(String token) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(AppConfig.storageKeyKioskToken, token);
+  }
+
+  /// Lee el kiosk token guardado.
+  static Future<String?> loadKioskToken() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(AppConfig.storageKeyKioskToken);
+  }
+
+  /// Limpia el kiosk token.
+  static Future<void> clearKioskToken() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(AppConfig.storageKeyKioskToken);
+  }
 }
