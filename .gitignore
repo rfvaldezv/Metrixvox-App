@@ -1,0 +1,30 @@
+﻿# ====== Flutter/Dart ======
+.dart_tool/
+.packages
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+
+# ====== IDE ======
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+
+# ====== Archivos auxiliares ======
+estructura.txt
+arbol_lib.txt
+codigo_app.txt
+lista_api.txt
+lista_lib.txt
+*.tmp
+*.bak
+
+# ====== OS ======
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# ====== Logs ======
+*.log
