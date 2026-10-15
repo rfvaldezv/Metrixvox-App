@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:metrixvox_app/config/app_config.dart';
 import 'package:metrixvox_app/screens/dashboard_screen.dart';
 import 'package:metrixvox_app/screens/dynamic_survey_screen.dart';
+import 'package:metrixvox_app/services/storage_service.dart';
 import 'package:metrixvox_app/services/survey_service.dart';
 
 void main() {
@@ -16,7 +17,7 @@ class MetrixVoxApp extends StatelessWidget {
     return MaterialApp(
       title: 'MetrixVox',
       theme: ThemeData(
-        primarySwatch: Colors.indigo,
+        colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
         useMaterial3: true,
       ),
       home: const TenantSelectorScreen(),
@@ -25,7 +26,7 @@ class MetrixVoxApp extends StatelessWidget {
   }
 }
 
-// Pantalla inicial de configuración de Sucursal / Tenant para la tablet o dispositivo
+// Pantalla inicial de configuración de Sucursal / Tenant
 class TenantSelectorScreen extends StatefulWidget {
   const TenantSelectorScreen({super.key});
 
@@ -34,9 +35,34 @@ class TenantSelectorScreen extends StatefulWidget {
 }
 
 class _TenantSelectorScreenState extends State<TenantSelectorScreen> {
-  final TextEditingController _tenantController = TextEditingController(text: "HOSPITAL_SAN_JOSE");
-  final TextEditingController _surveyController = TextEditingController(text: "SURVEY_HOSPITAL_01");
+  final TextEditingController _tenantController =
+      TextEditingController(text: AppConfig.defaultTenantId);
+  final TextEditingController _surveyController =
+      TextEditingController(text: AppConfig.defaultSurveyCode);
   bool _isLoading = false;
+  bool _configLoaded = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSavedConfig();
+  }
+
+  /// Carga la config guardada en sesiones anteriores (si existe).
+  Future<void> _loadSavedConfig() async {
+    final config = await StorageService.loadConfig();
+    if (!mounted) return;
+
+    setState(() {
+      if (config.tenantId != null && config.tenantId!.isNotEmpty) {
+        _tenantController.text = config.tenantId!;
+      }
+      if (config.surveyCode != null && config.surveyCode!.isNotEmpty) {
+        _surveyController.text = config.surveyCode!;
+      }
+      _configLoaded = true;
+    });
+  }
 
   @override
   void dispose() {
@@ -45,13 +71,15 @@ class _TenantSelectorScreenState extends State<TenantSelectorScreen> {
     super.dispose();
   }
 
-  void _cargarEncuesta() async {
+  Future<void> _cargarEncuesta() async {
     final tenantId = _tenantController.text.trim().toUpperCase();
     final surveyCode = _surveyController.text.trim();
 
     if (tenantId.isEmpty || surveyCode.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Por favor, ingresa el Tenant ID y el Código de Encuesta.')),
+        const SnackBar(
+            content:
+                Text('Por favor, ingresa el Tenant ID y el Código de Encuesta.')),
       );
       return;
     }
@@ -62,10 +90,16 @@ class _TenantSelectorScreenState extends State<TenantSelectorScreen> {
       final surveyService = SurveyService(tenantId: tenantId);
       final surveyData = await surveyService.fetchSurvey(surveyCode);
 
+      // Guardar config para la próxima vez
+      await StorageService.saveConfig(
+        tenantId: tenantId,
+        surveyCode: surveyCode,
+      );
+
       if (!mounted) return;
       setState(() => _isLoading = false);
 
-      // Navegar a la pantalla dinámica de la encuesta pasando los datos y el tenant
+      // Navegar a la pantalla dinámica de la encuesta
       Navigator.push(
         context,
         MaterialPageRoute(
@@ -82,7 +116,9 @@ class _TenantSelectorScreenState extends State<TenantSelectorScreen> {
         context: context,
         builder: (context) => AlertDialog(
           title: const Text("Error de Conexión"),
-          content: Text("No se pudo cargar la encuesta desde ${AppConfig.apiBaseUrl}:\n$e"),
+          content: Text(
+            "No se pudo cargar la encuesta.\n\n$e",
+          ),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(),
@@ -112,6 +148,43 @@ class _TenantSelectorScreenState extends State<TenantSelectorScreen> {
     );
   }
 
+  Future<void> _olvidarConfiguracion() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Olvidar configuración'),
+        content: const Text(
+          'Se borrarán el Tenant ID y el Código de Encuesta guardados '
+          'en este dispositivo.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancelar'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Olvidar', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    await StorageService.clearConfig();
+    if (!mounted) return;
+
+    setState(() {
+      _tenantController.text = AppConfig.defaultTenantId;
+      _surveyController.text = AppConfig.defaultSurveyCode;
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Configuración eliminada.')),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -119,6 +192,14 @@ class _TenantSelectorScreenState extends State<TenantSelectorScreen> {
         title: const Text('MetrixVox - Terminal de Captura'),
         backgroundColor: Colors.indigo,
         foregroundColor: Colors.white,
+        actions: [
+          if (_configLoaded)
+            IconButton(
+              icon: const Icon(Icons.delete_outline),
+              tooltip: 'Olvidar configuración',
+              onPressed: _olvidarConfiguracion,
+            ),
+        ],
       ),
       body: Padding(
         padding: const EdgeInsets.all(24.0),
@@ -130,12 +211,16 @@ class _TenantSelectorScreenState extends State<TenantSelectorScreen> {
                 mainAxisAlignment: MainAxisAlignment.center,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  const Icon(Icons.analytics_rounded, size: 80, color: Colors.indigo),
+                  const Icon(Icons.analytics_rounded,
+                      size: 80, color: Colors.indigo),
                   const SizedBox(height: 16),
                   const Text(
                     "Configuración de Dispositivo",
                     textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.indigo),
+                    style: TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.indigo),
                   ),
                   const SizedBox(height: 32),
                   TextField(
@@ -145,12 +230,13 @@ class _TenantSelectorScreenState extends State<TenantSelectorScreen> {
                       border: OutlineInputBorder(),
                       prefixIcon: Icon(Icons.business),
                     ),
+                    textCapitalization: TextCapitalization.characters,
                   ),
                   const SizedBox(height: 16),
                   TextField(
                     controller: _surveyController,
                     decoration: const InputDecoration(
-                      labelText: "Código de Encuesta (Ej. SURVEY_01)",
+                      labelText: "Código de Encuesta (Ej. SURVEY_HOSPITAL_01)",
                       border: OutlineInputBorder(),
                       prefixIcon: Icon(Icons.assignment),
                     ),
@@ -166,7 +252,8 @@ class _TenantSelectorScreenState extends State<TenantSelectorScreen> {
                       onPressed: _isLoading ? null : _cargarEncuesta,
                       child: _isLoading
                           ? const CircularProgressIndicator(color: Colors.white)
-                          : const Text("Iniciar Cuestionario", style: TextStyle(fontSize: 16)),
+                          : const Text("Iniciar Cuestionario",
+                              style: TextStyle(fontSize: 16)),
                     ),
                   ),
                   const SizedBox(height: 12),
@@ -175,7 +262,8 @@ class _TenantSelectorScreenState extends State<TenantSelectorScreen> {
                     child: OutlinedButton.icon(
                       onPressed: _abrirDashboard,
                       icon: const Icon(Icons.bar_chart),
-                      label: const Text("Ver Dashboard", style: TextStyle(fontSize: 16)),
+                      label: const Text("Ver Dashboard",
+                          style: TextStyle(fontSize: 16)),
                     ),
                   ),
                 ],
