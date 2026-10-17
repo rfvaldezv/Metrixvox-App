@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:metrixvox_app/config/theme.dart';
+import 'package:metrixvox_app/widgets/metrix_logo.dart';
 
 /// Pantalla de bienvenida del kiosco (idle / attract screen).
 /// Se muestra cuando nadie está usando la terminal.
@@ -31,20 +32,22 @@ class IdleScreen extends StatelessWidget {
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      // Ícono animado con pulso
+                      // Logo animado con pulso
                       Container(
-                        width: 140,
-                        height: 140,
-                        decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.15),
-                          shape: BoxShape.circle,
+                      width: 180,
+                      height: 180,
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.15),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Center(
+                      child: MetrixLogo(
+                        size: 70,
+                        showText: false,
+                        forceColor: Colors.white,
                         ),
-                        child: const Icon(
-                          Icons.favorite_rounded,
-                          size: 80,
-                          color: Colors.white,
-                        ),
-                      )
+                      ),
+                    )
                           .animate(onPlay: (c) => c.repeat(reverse: true))
                           .scale(
                             begin: const Offset(1, 1),
