@@ -13,14 +13,14 @@ class SurveyFlowScreen extends StatefulWidget {
   final Survey survey;
   final String tenantId;
   final String? branchName;
-  final VoidCallback onCompleted;   // 🆕
+  final VoidCallback onCompleted;
 
   const SurveyFlowScreen({
     super.key,
     required this.survey,
     required this.tenantId,
     this.branchName,
-    required this.onCompleted,      // 🆕
+    required this.onCompleted,
   });
 
   @override
@@ -35,13 +35,10 @@ class _SurveyFlowScreenState extends State<SurveyFlowScreen> {
   int _currentIndex = 0;
   bool _isSubmitting = false;
 
-  /// Total de "pasos": N preguntas + 1 paso de verbatim.
   int get _totalSteps => _questions.length + 1;
 
-  /// True si estamos en el paso de verbatim (último).
   bool get _isVerbatimStep => _currentIndex == _questions.length;
 
-  /// Pregunta actual (null si estamos en verbatim).
   dynamic get _currentQuestion =>
       _isVerbatimStep ? null : _questions[_currentIndex];
 
@@ -57,14 +54,12 @@ class _SurveyFlowScreenState extends State<SurveyFlowScreen> {
     super.dispose();
   }
 
-  /// Avanza al siguiente paso o envía si es el último.
   Future<void> _next() async {
     if (_isVerbatimStep) {
       await _submit();
       return;
     }
 
-    // Validar que la pregunta actual tenga respuesta
     final q = _currentQuestion;
     if (q != null && q.isRequired && !_answers.containsKey(q.id)) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -76,17 +71,14 @@ class _SurveyFlowScreenState extends State<SurveyFlowScreen> {
     setState(() => _currentIndex++);
   }
 
-  /// Retrocede un paso.
   void _previous() {
     if (_currentIndex == 0) return;
     setState(() => _currentIndex--);
   }
 
-  /// Envía la respuesta completa al backend.
   Future<void> _submit() async {
     setState(() => _isSubmitting = true);
 
-    // Construir payload de métricas
     final metricsPayload = <Map<String, dynamic>>[];
     _answers.forEach((questionId, value) {
       metricsPayload.add({
@@ -101,13 +93,13 @@ class _SurveyFlowScreenState extends State<SurveyFlowScreen> {
       "tenantId": widget.tenantId,
       "surveyCode": widget.survey.surveyCode,
       "respondentContext": {
-      "subjectId": null,
-      "branchOrLocationId": widget.branchName ?? "SUCURSAL_CENTRO",
-      "channel": "TABLET",
+        "subjectId": null,
+        "branchOrLocationId": widget.branchName ?? "SUCURSAL_CENTRO",
+        "channel": "TABLET",
       },
       "metrics": metricsPayload,
       "sentimentAnalysis": {
-      "verbatim": _verbatimController.text.trim(),
+        "verbatim": _verbatimController.text.trim(),
       }
     };
 
@@ -118,13 +110,12 @@ class _SurveyFlowScreenState extends State<SurveyFlowScreen> {
     setState(() => _isSubmitting = false);
 
     if (success) {
-      // Ir a la pantalla de agradecimiento
       Navigator.of(context).pushReplacement(
-          MaterialPageRoute(
-              builder: (_) => ThankYouScreen(
-                  onComplete: widget.onCompleted,  // ← llama al callback del padre
-              ),
+        MaterialPageRoute(
+          builder: (_) => ThankYouScreen(
+            onComplete: widget.onCompleted,
           ),
+        ),
       );
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -136,7 +127,6 @@ class _SurveyFlowScreenState extends State<SurveyFlowScreen> {
     }
   }
 
-  /// Texto de la sección actual.
   String get _currentSection {
     if (_isVerbatimStep) return 'Comentario final';
     return widget.survey.sectionNameForQuestion(_currentIndex);
@@ -199,42 +189,44 @@ class _SurveyFlowScreenState extends State<SurveyFlowScreen> {
               ),
             ),
 
-            // Controles inferiores
-            Padding(
-              padding: const EdgeInsets.all(32),
-              child: Row(
-                children: [
-                  // Botón atrás (solo si no estamos en la primera)
-                  if (_currentIndex > 0)
-                    Expanded(
-                      flex: 1,
-                      child: BigButton(
-                        label: 'Atrás',
-                        icon: Icons.arrow_back_rounded,
-                        onTap: _previous,
-                        isPrimary: false,
-                      ),
-                    ),
-                  if (_currentIndex > 0) const SizedBox(width: 16),
+            // Controles inferiores (Adaptados a celular)
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final isSmallScreen = constraints.maxWidth < 600;
+                
+                return Padding(
+                  padding: EdgeInsets.all(isSmallScreen ? 16 : 32),
+                  child: Row(
+                    children: [
+                      if (_currentIndex > 0)
+                        Expanded(
+                          flex: 2,
+                          child: BigButton(
+                            label: 'Atrás',
+                            icon: Icons.arrow_back_rounded,
+                            onTap: _previous,
+                            isPrimary: false,
+                          ),
+                        ),
+                      if (_currentIndex > 0) SizedBox(width: isSmallScreen ? 8 : 16),
 
-                  // Botón continuar / enviar
-                  Expanded(
-                    flex: 2,
-                    child: BigButton(
-                      label: _isVerbatimStep
-                          ? 'Enviar opinión'
-                          : (_currentIndex == _questions.length - 1
-                              ? 'Continuar'
-                              : 'Continuar'),
-                      icon: _isVerbatimStep
-                          ? Icons.send_rounded
-                          : Icons.arrow_forward_rounded,
-                      onTap: _next,
-                      isLoading: _isSubmitting,
-                    ),
+                      Expanded(
+                        flex: 3,
+                        child: BigButton(
+                          label: _isVerbatimStep
+                              ? 'Enviar opinión'
+                              : 'Continuar',
+                          icon: _isVerbatimStep
+                              ? Icons.send_rounded
+                              : Icons.arrow_forward_rounded,
+                          onTap: _next,
+                          isLoading: _isSubmitting,
+                        ),
+                      ),
+                    ],
                   ),
-                ],
-              ),
+                );
+              },
             ),
           ],
         ),

@@ -25,27 +25,44 @@ class BigButton extends StatelessWidget {
     return SizedBox(
       height: 72,
       child: isPrimary
-          ? ElevatedButton.icon(
+          ? ElevatedButton(
               onPressed: enabled ? onTap : null,
-              icon: isLoading
-                  ? const SizedBox(
-                      width: 24,
-                      height: 24,
-                      child: CircularProgressIndicator(
-                        color: Colors.white,
-                        strokeWidth: 2.5,
-                      ),
-                    )
-                  : (icon != null ? Icon(icon, size: 28) : const SizedBox.shrink()),
-              label: Text(label),
+              child: _buildContent(),
             )
-          : OutlinedButton.icon(
+          : OutlinedButton(
               onPressed: enabled ? onTap : null,
-              icon: icon != null
-                  ? Icon(icon, size: 28, color: MetrixTheme.indigo)
-                  : const SizedBox.shrink(),
-              label: Text(label),
+              child: _buildContent(),
             ),
+    );
+  }
+
+  Widget _buildContent() {
+    if (isLoading) {
+      return const SizedBox(
+        width: 24,
+        height: 24,
+        child: CircularProgressIndicator(
+          color: Colors.white,
+          strokeWidth: 2.5,
+        ),
+      );
+    }
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        if (icon != null) ...[
+          Icon(icon, size: 28),
+          const SizedBox(width: 8),
+        ],
+        Flexible(
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(label),
+          ),
+        ),
+      ],
     );
   }
 }
