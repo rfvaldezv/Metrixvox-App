@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:metrixvox_app/config/theme.dart';
 
 /// Botón grande estilo kiosco, pensado para pantallas táctiles.
 class BigButton extends StatelessWidget {
