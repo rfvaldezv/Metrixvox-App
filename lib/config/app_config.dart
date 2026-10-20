@@ -34,5 +34,5 @@ class AppConfig {
   // ============================================================
   // Timeouts
   // ============================================================
-  static const Duration apiTimeout = Duration(seconds: 15);
+  static const Duration apiTimeout = Duration(seconds: 30);
 }
