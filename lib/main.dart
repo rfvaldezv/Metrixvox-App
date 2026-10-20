@@ -4,10 +4,12 @@ import 'package:metrixvox_app/config/theme.dart';
 import 'package:metrixvox_app/models/survey.dart';
 import 'package:metrixvox_app/screens/kiosco/error_screen.dart';
 import 'package:metrixvox_app/screens/kiosco/idle_screen.dart';
+import 'package:metrixvox_app/screens/kiosco/pairing_screen.dart';
 import 'package:metrixvox_app/screens/kiosco/survey_flow_screen.dart';
 import 'package:metrixvox_app/services/kiosk_service.dart';
 import 'package:metrixvox_app/services/storage_service.dart';
 import 'package:metrixvox_app/services/survey_service.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 void main() {
   runApp(const MetrixVoxApp());
@@ -27,11 +29,6 @@ class MetrixVoxApp extends StatelessWidget {
   }
 }
 
-/// Pantalla raíz del kiosco.
-/// Flujo:
-///   1. Obtiene el kiosk token (de env o storage)
-///   2. Llama a /api/v1/kiosks/me para obtener su config
-///   3. Al tocar "TOCA PARA COMENZAR", carga la encuesta
 class KioskRootScreen extends StatefulWidget {
   const KioskRootScreen({super.key});
 
@@ -43,6 +40,9 @@ class _KioskRootScreenState extends State<KioskRootScreen> {
   KioskConfig? _config;
   String _errorMessage = '';
   bool _isLoading = true;
+  bool _needsPairing = false;
+
+  final _secureStorage = const FlutterSecureStorage();
 
   @override
   void initState() {
@@ -50,34 +50,55 @@ class _KioskRootScreenState extends State<KioskRootScreen> {
     _bootstrap();
   }
 
-  /// Arranca el kiosco: obtiene config y prepara todo.
   Future<void> _bootstrap() async {
     setState(() {
       _isLoading = true;
       _errorMessage = '';
+      _needsPairing = false;
     });
 
     try {
-      // 1) Obtener kiosk token (de env o storage)
-      final kioskToken = await _resolveKioskToken();
+      // 1) Intentar obtener el token (Secure Storage tiene prioridad)
+      String kioskToken = await _secureStorage.read(key: 'KIOSK_TOKEN') ?? '';
 
-      if (kioskToken.isEmpty) {
-        throw KioskException(
-          'Kiosco no configurado.\n'
-          'Contacta al administrador para asignarte un token.',
-        );
+      // Fallback por si lo quieres seguir usando con --dart-define
+      if (kioskToken.isEmpty && AppConfig.kioskTokenFromEnv.isNotEmpty) {
+        kioskToken = AppConfig.kioskTokenFromEnv;
+        await _secureStorage.write(key: 'KIOSK_TOKEN', value: kioskToken);
       }
 
-      // 2) Consultar /kiosks/me
+      // 2) Si no hay token, mostrar pantalla de Pairing
+      if (kioskToken.isEmpty) {
+        if (!mounted) return;
+        setState(() {
+          _needsPairing = true;
+          _isLoading = false;
+        });
+        return;
+      }
+
+      // 3) Consultar /kiosks/me
       final config = await KioskService.getMyConfig(kioskToken);
 
       if (!mounted) return;
       setState(() {
         _config = config;
         _isLoading = false;
+        _needsPairing = false;
       });
     } on KioskException catch (e) {
       if (!mounted) return;
+      
+      // Si el servidor dice 401, la tablet debe re-vincularse (token revocado)
+      if (e.statusCode == 401) {
+        await _secureStorage.delete(key: 'KIOSK_TOKEN');
+        setState(() {
+          _needsPairing = true;
+          _isLoading = false;
+        });
+        return;
+      }
+
       setState(() {
         _errorMessage = e.message;
         _isLoading = false;
@@ -91,28 +112,25 @@ class _KioskRootScreenState extends State<KioskRootScreen> {
     }
   }
 
-  /// Resuelve el token del kiosco desde:
-  ///   1. --dart-define=KIOSK_TOKEN=xxxxx
-  ///   2. shared_preferences (si se configuró alguna vez)
-  Future<String> _resolveKioskToken() async {
-    if (AppConfig.kioskTokenFromEnv.isNotEmpty) {
-      return AppConfig.kioskTokenFromEnv;
+  Future<void> _onPaired(KioskConfig config) async {
+    // Guardar el token devuelto por el pairing
+    if (config.kioskToken != null && config.kioskToken!.isNotEmpty) {
+      await _secureStorage.write(key: 'KIOSK_TOKEN', value: config.kioskToken!);
     }
-    return await StorageService.loadKioskToken() ?? '';
+    // Recargar config con el nuevo token
+    await _bootstrap();
   }
 
-  /// Botón "TOCA PARA COMENZAR": carga la encuesta y entra al flujo.
   Future<void> _onStart() async {
     if (_config == null) return;
 
     try {
       final surveyService = SurveyService(tenantId: _config!.tenantId);
       final raw = await surveyService.fetchSurvey(_config!.surveyCode);
-     final survey = Survey.fromJson(raw);
+      final survey = Survey.fromJson(raw);
 
       if (!mounted) return;
 
-      // Capturamos el Navigator antes del push
       final navigator = Navigator.of(context);
 
       await navigator.push(
@@ -122,50 +140,47 @@ class _KioskRootScreenState extends State<KioskRootScreen> {
             tenantId: _config!.tenantId,
             branchName: _config!.branchName,
             onCompleted: () {
-              // Usar el Navigator capturado (siempre válido)
               debugPrint('[Main] onCompleted — popUntil ejecutado');
               navigator.popUntil((route) => route.isFirst);
             },
           ),
         ),
       );
-  } catch (e) {
-    if (!mounted) return;
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Error'),
-        content: Text('No se pudo cargar la encuesta.\n\n$e'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Aceptar'),
-          ),
-        ],
-      ),
-    );
+    } catch (e) {
+      if (!mounted) return;
+      showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Error'),
+          content: Text('No se pudo cargar la encuesta.\n\n$e'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Aceptar'),
+            ),
+          ],
+        ),
+      );
+    }
   }
-}
-
 
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      );
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+
+    if (_needsPairing) {
+      return PairingScreen(onPaired: _onPaired);
     }
 
     if (_errorMessage.isNotEmpty) {
-      return KioskErrorScreen(
-        message: _errorMessage,
-        onRetry: _bootstrap,
-      );
+      return KioskErrorScreen(message: _errorMessage, onRetry: _bootstrap);
     }
 
     return IdleScreen(
       onStart: _onStart,
-      onAdminTap: () {}, // Ya no hay panel admin en el kiosco
+      onAdminTap: () {},
     );
   }
 }
