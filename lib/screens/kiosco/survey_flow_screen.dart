@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:metrixvox_app/models/survey.dart';
 import 'package:metrixvox_app/screens/kiosco/question_view.dart';
 import 'package:metrixvox_app/screens/kiosco/thank_you_screen.dart';
@@ -7,8 +7,7 @@ import 'package:metrixvox_app/services/survey_service.dart';
 import 'package:metrixvox_app/widgets/big_button.dart';
 import 'package:metrixvox_app/widgets/progress_bar.dart';
 
-/// Flujo completo del kiosco: una pregunta a la vez, con animaciones,
-/// barra de progreso y pantalla final de agradecimiento.
+/// Flujo completo del kiosco: una pregunta a la vez.
 class SurveyFlowScreen extends StatefulWidget {
   final Survey survey;
   final String tenantId;
@@ -29,16 +28,15 @@ class SurveyFlowScreen extends StatefulWidget {
 
 class _SurveyFlowScreenState extends State<SurveyFlowScreen> {
   late final List<dynamic> _questions;
-  final Map<String, int> _answers = {};
+  final Map<String, dynamic> _answers = {};
   final TextEditingController _verbatimController = TextEditingController();
+  final Map<String, TextEditingController> _textControllers = {};
 
   int _currentIndex = 0;
   bool _isSubmitting = false;
 
   int get _totalSteps => _questions.length + 1;
-
   bool get _isVerbatimStep => _currentIndex == _questions.length;
-
   dynamic get _currentQuestion =>
       _isVerbatimStep ? null : _questions[_currentIndex];
 
@@ -51,6 +49,9 @@ class _SurveyFlowScreenState extends State<SurveyFlowScreen> {
   @override
   void dispose() {
     _verbatimController.dispose();
+    for (final c in _textControllers.values) {
+      c.dispose();
+    }
     super.dispose();
   }
 
@@ -63,7 +64,7 @@ class _SurveyFlowScreenState extends State<SurveyFlowScreen> {
     final q = _currentQuestion;
     if (q != null && q.isRequired && !_answers.containsKey(q.id)) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Selecciona una opción para continuar')),
+        const SnackBar(content: Text('Selecciona una opcion para continuar')),
       );
       return;
     }
@@ -80,14 +81,27 @@ class _SurveyFlowScreenState extends State<SurveyFlowScreen> {
     setState(() => _isSubmitting = true);
 
     final metricsPayload = <Map<String, dynamic>>[];
+    String? verbatimText;
+
     _answers.forEach((questionId, value) {
-      metricsPayload.add({
-        "category": "General",
-        "metricKey": questionId,
-        "numericValue": value.toDouble(),
-        "weight": 1.0,
-      });
+      if (value is int) {
+        metricsPayload.add({
+          "category": "General",
+          "metricKey": questionId,
+          "numericValue": value.toDouble(),
+          "weight": 1.0,
+        });
+      } else if (value is String && value.isNotEmpty) {
+        verbatimText = value;
+      }
     });
+
+    final finalVerbatim = _verbatimController.text.trim();
+    if (finalVerbatim.isNotEmpty) {
+      verbatimText = verbatimText == null
+          ? finalVerbatim
+          : '$verbatimText | $finalVerbatim';
+    }
 
     final payload = {
       "tenantId": widget.tenantId,
@@ -99,7 +113,7 @@ class _SurveyFlowScreenState extends State<SurveyFlowScreen> {
       },
       "metrics": metricsPayload,
       "sentimentAnalysis": {
-        "verbatim": _verbatimController.text.trim(),
+        "verbatim": verbatimText ?? "",
       }
     };
 
@@ -112,15 +126,13 @@ class _SurveyFlowScreenState extends State<SurveyFlowScreen> {
     if (success) {
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(
-          builder: (_) => ThankYouScreen(
-            onComplete: widget.onCompleted,
-          ),
+          builder: (_) => ThankYouScreen(onComplete: widget.onCompleted),
         ),
       );
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Error al enviar. Verifica la conexión.'),
+          content: Text('Error al enviar. Verifica la conexion.'),
           backgroundColor: Colors.red,
         ),
       );
@@ -132,6 +144,13 @@ class _SurveyFlowScreenState extends State<SurveyFlowScreen> {
     return widget.survey.sectionNameForQuestion(_currentIndex);
   }
 
+  TextEditingController _getTextController(String questionId) {
+    return _textControllers.putIfAbsent(
+      questionId,
+      () => TextEditingController(),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -139,30 +158,10 @@ class _SurveyFlowScreenState extends State<SurveyFlowScreen> {
       body: SafeArea(
         child: Column(
           children: [
-            // Barra de progreso superior
-            KioskProgressBar(
-              current: _currentIndex + 1,
-              total: _totalSteps,
-            ),
-
-            // Contenido principal con transición
+            KioskProgressBar(current: _currentIndex + 1, total: _totalSteps),
             Expanded(
               child: AnimatedSwitcher(
                 duration: const Duration(milliseconds: 400),
-                switchInCurve: Curves.easeOut,
-                switchOutCurve: Curves.easeIn,
-                transitionBuilder: (child, animation) {
-                  return FadeTransition(
-                    opacity: animation,
-                    child: SlideTransition(
-                      position: Tween<Offset>(
-                        begin: const Offset(0.05, 0),
-                        end: Offset.zero,
-                      ).animate(animation),
-                      child: child,
-                    ),
-                  );
-                },
                 child: _isVerbatimStep
                     ? VerbatimView(
                         key: const ValueKey('verbatim'),
@@ -171,7 +170,7 @@ class _SurveyFlowScreenState extends State<SurveyFlowScreen> {
                     : SingleChildScrollView(
                         key: ValueKey('q_$_currentIndex'),
                         child: SizedBox(
-                          height: MediaQuery.of(context).size.height * 0.6,
+                          height: MediaQuery.of(context).size.height * 0.65,
                           child: QuestionView(
                             question: _currentQuestion,
                             sectionName: _currentSection,
@@ -183,17 +182,17 @@ class _SurveyFlowScreenState extends State<SurveyFlowScreen> {
                                 _answers[_currentQuestion.id] = value;
                               });
                             },
+                            textController: _currentQuestion?.type == 'TEXT'
+                                ? _getTextController(_currentQuestion.id)
+                                : null,
                           ),
                         ),
                       ),
               ),
             ),
-
-            // Controles inferiores (Adaptados a celular)
             LayoutBuilder(
               builder: (context, constraints) {
                 final isSmallScreen = constraints.maxWidth < 600;
-                
                 return Padding(
                   padding: EdgeInsets.all(isSmallScreen ? 16 : 32),
                   child: Row(
@@ -202,20 +201,18 @@ class _SurveyFlowScreenState extends State<SurveyFlowScreen> {
                         Expanded(
                           flex: 2,
                           child: BigButton(
-                            label: 'Atrás',
+                            label: 'Atras',
                             icon: Icons.arrow_back_rounded,
                             onTap: _previous,
                             isPrimary: false,
                           ),
                         ),
-                      if (_currentIndex > 0) SizedBox(width: isSmallScreen ? 8 : 16),
-
+                      if (_currentIndex > 0)
+                        SizedBox(width: isSmallScreen ? 8 : 16),
                       Expanded(
                         flex: 3,
                         child: BigButton(
-                          label: _isVerbatimStep
-                              ? 'Enviar opinión'
-                              : 'Continuar',
+                          label: _isVerbatimStep ? 'Enviar opinion' : 'Continuar',
                           icon: _isVerbatimStep
                               ? Icons.send_rounded
                               : Icons.arrow_forward_rounded,
